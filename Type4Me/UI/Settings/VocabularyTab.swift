@@ -8,6 +8,9 @@ struct VocabularyTab: View {
 
     // Snippets
     @State private var snippets: [(trigger: String, value: String)] = SnippetStorage.load()
+    @State private var editingIndex: Int? = nil
+    @State private var editTrigger: String = ""
+    @State private var editValue: String = ""
     @State private var newTrigger: String = ""
     @State private var newValue: String = ""
 
@@ -170,32 +173,100 @@ struct VocabularyTab: View {
 
     private func snippetRow(index: Int, trigger: String, value: String) -> some View {
         HStack(spacing: 8) {
-            Text(trigger)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(TF.settingsText)
-                .frame(width: 152, alignment: .leading)
+            if editingIndex == index {
+                // Editing state
+                TextField("", text: $editTrigger)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(TF.settingsText)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .frame(width: 152, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(TF.settingsBg))
+                    .onSubmit { commitEdit() }
 
-            Image(systemName: "arrow.right")
-                .font(.system(size: 10))
-                .foregroundStyle(TF.settingsTextTertiary)
-
-            Text(value)
-                .font(.system(size: 12))
-                .foregroundStyle(TF.settingsTextSecondary)
-                .lineLimit(1)
-
-            Spacer()
-
-            Button {
-                removeSnippet(at: index)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10))
                     .foregroundStyle(TF.settingsTextTertiary)
+
+                TextField("", text: $editValue)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(TF.settingsText)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(TF.settingsBg))
+                    .onSubmit { commitEdit() }
+
+                Spacer()
+
+                Button { commitEdit() } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TF.settingsAccentGreen)
+                }
+                .buttonStyle(.plain)
+
+                Button { cancelEdit() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TF.settingsTextTertiary)
+                }
+                .buttonStyle(.plain)
+            } else {
+                // Display state
+                Text(trigger)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(TF.settingsText)
+                    .frame(width: 152, alignment: .leading)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(TF.settingsTextTertiary)
+
+                Text(value)
+                    .font(.system(size: 12))
+                    .foregroundStyle(TF.settingsTextSecondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button { startEdit(index: index) } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TF.settingsTextTertiary)
+                }
+                .buttonStyle(.plain)
+
+                Button { removeSnippet(at: index) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TF.settingsTextTertiary)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
+    }
+
+    private func startEdit(index: Int) {
+        editTrigger = snippets[index].trigger
+        editValue = snippets[index].value
+        editingIndex = index
+    }
+
+    private func commitEdit() {
+        guard let index = editingIndex else { return }
+        let trigger = editTrigger.trimmingCharacters(in: .whitespaces)
+        let value = editValue.trimmingCharacters(in: .whitespaces)
+        guard !trigger.isEmpty, !value.isEmpty else { return }
+        snippets[index] = (trigger: trigger, value: value)
+        SnippetStorage.save(snippets)
+        editingIndex = nil
+    }
+
+    private func cancelEdit() {
+        editingIndex = nil
     }
 
     // MARK: - Actions
