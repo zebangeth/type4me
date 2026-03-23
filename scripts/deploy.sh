@@ -3,7 +3,13 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_PATH="/Applications/Type4Me.app"
-SIGNING_IDENTITY="${CODESIGN_IDENTITY:--}"
+if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    SIGNING_IDENTITY="$CODESIGN_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Type4Me Dev"; then
+    SIGNING_IDENTITY="Type4Me Dev"
+else
+    SIGNING_IDENTITY="-"
+fi
 
 echo "Building release..."
 swift build -c release --package-path "$PROJECT_DIR" 2>&1 | grep -E "Build complete|error:|warning:" || true

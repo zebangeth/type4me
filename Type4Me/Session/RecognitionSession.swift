@@ -268,8 +268,9 @@ actor RecognitionSession {
         let needsLLM = !currentMode.prompt.isEmpty && !isPerformanceMode
         var earlyLLMTask: Task<String?, Never>?
         if needsLLM {
-            let earlyText = currentTranscript.composedText
+            var earlyText = currentTranscript.composedText
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            earlyText = SnippetStorage.apply(to: earlyText)
             DebugFileLogger.log("stop: needsLLM=true mode=\(currentMode.name) text=\(earlyText.count)chars specMatch=\(earlyText == speculativeLLMText)")
             if !earlyText.isEmpty {
                 if earlyText == speculativeLLMText, let specTask = speculativeLLMTask {
@@ -383,6 +384,9 @@ actor RecognitionSession {
             var finalText = effectiveText
             var processedText: String? = nil
 
+            // Apply snippet replacements before LLM (e.g. "我的邮箱" → actual email)
+            finalText = SnippetStorage.apply(to: finalText)
+
             // LLM post-processing: prefer early result (fired at stop time),
             // fall back to synchronous call for very short recordings where
             // no streaming text was available yet.
@@ -404,7 +408,7 @@ actor RecognitionSession {
                     do {
                         let client = currentLLMClient()
                         let result = try await client.process(
-                            text: rawText, prompt: currentMode.prompt, config: llmConfig
+                            text: finalText, prompt: currentMode.prompt, config: llmConfig
                         )
                         processedText = result
                         finalText = result
@@ -417,16 +421,6 @@ actor RecognitionSession {
                     logger.warning("No LLM credentials, skipping post-processing")
                     onASREvent?(.processingResult(text: rawText))
                 }
-            }
-
-            // Apply snippet replacements (e.g. "我的邮箱" → actual email)
-            let beforeSnippet = finalText
-            finalText = SnippetStorage.apply(to: finalText)
-            if finalText != beforeSnippet {
-                NSLog("[Session] Snippet replacement applied: '%@' → '%@'", beforeSnippet, finalText)
-            } else {
-                let snippets = SnippetStorage.load()
-                NSLog("[Session] No snippet match. Text='%@', snippets=%d", String(finalText.prefix(100)), snippets.count)
             }
 
             DebugFileLogger.log("stop: injecting +\(ContinuousClock.now - stopT0)")
@@ -535,8 +529,9 @@ actor RecognitionSession {
     }
 
     private func fireSpeculativeLLM() async {
-        let text = currentTranscript.composedText
+        var text = currentTranscript.composedText
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        text = SnippetStorage.apply(to: text)
         guard !text.isEmpty, text != speculativeLLMText else { return }
         guard let llmConfig = KeychainService.loadLLMConfig() else { return }
 
