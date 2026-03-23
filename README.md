@@ -1,5 +1,5 @@
 
-MacOS语音输入工具，实时识别、大模型文本优化、全本地存储，Typeless平替
+MacOS语音输入工具，实时识别、大模型文本优化、全本地存储
 
 <img width="420" height="78" alt="image" src="https://github.com/user-attachments/assets/dbc676e0-6128-4bed-89a2-553d2d1a197c" />
 
