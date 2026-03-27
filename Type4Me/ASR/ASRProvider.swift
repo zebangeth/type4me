@@ -25,7 +25,7 @@ enum ASRProvider: String, CaseIterable, Codable, Sendable {
     var displayName: String {
         switch self {
         case .sherpa:   return L("本地识别 (Paraformer)", "Local (Paraformer)")
-        case .openai:   return "OpenAI Whisper"
+        case .openai:   return "OpenAI"
         case .azure:    return "Azure Speech"
         case .google:   return "Google Cloud STT"
         case .aws:      return "AWS Transcribe"
