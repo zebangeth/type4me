@@ -370,28 +370,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu Bar Visibility Check (macOS 26+)
 
-    private static let menuBarCheckKey = "tf_menuBarHiddenAlertShown"
-
     /// On macOS 26 Tahoe, System Settings > Menu Bar > "Allow in Menu Bar" can hide
     /// third-party status items by rendering them offscreen. Detect this and alert the user.
     private func checkMenuBarVisibility() {
         // Only check on macOS 26+ where this feature exists
         guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 else { return }
-        // Don't nag repeatedly — only alert once per app version
-        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        let shownForVersion = UserDefaults.standard.string(forKey: Self.menuBarCheckKey)
-        guard shownForVersion != currentVersion else { return }
 
         // Delay to give SwiftUI MenuBarExtra time to create the status item
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self else { return }
             MainActor.assumeIsolated {
-                self.performMenuBarCheck(version: currentVersion)
+                self.performMenuBarCheck()
             }
         }
     }
 
-    private func performMenuBarCheck(version: String) {
+    private func performMenuBarCheck() {
         // Find status bar windows belonging to our app.
         // SwiftUI's MenuBarExtra creates an NSStatusBarWindow with a button inside.
         let statusBarWindows = NSApp.windows.filter {
@@ -405,21 +399,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             // Check if any status bar window is in a reasonable screen position.
             // macOS 26 moves hidden items far offscreen (e.g. y < -10000).
-            let screenFrame = NSScreen.main?.frame ?? .zero
+            // Check against ALL screens to handle multi-monitor setups correctly.
+            let allScreens = NSScreen.screens
             isVisible = statusBarWindows.contains { window in
                 let frame = window.frame
-                return frame.origin.x >= -100
-                    && frame.origin.x <= screenFrame.width + 100
-                    && frame.origin.y >= -100
+                return allScreens.contains { screen in
+                    let sf = screen.frame
+                    return frame.origin.x >= sf.minX - 100
+                        && frame.origin.x <= sf.maxX + 100
+                        && frame.origin.y >= sf.minY - 100
+                }
             }
         }
 
         guard !isVisible else { return }
 
         NSLog("[Type4Me] Menu bar icon appears hidden by system settings")
-
-        // Remember we showed this alert for this version
-        UserDefaults.standard.set(version, forKey: Self.menuBarCheckKey)
 
         let alert = NSAlert()
         alert.messageText = L(
