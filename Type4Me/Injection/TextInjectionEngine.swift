@@ -41,11 +41,15 @@ final class TextInjectionEngine: @unchecked Sendable {
             return ClipboardSnapshot(items: items, changeCount: changeCount)
         }
 
-        func restore() {
+        /// Restore clipboard to captured state.
+        /// - Parameter expectedChangeCount: the changeCount observed right after
+        ///   our `copyToClipboard` call. If the clipboard has been modified by
+        ///   another app since then, restoration is skipped.
+        func restore(expectedChangeCount: Int) {
             let pb = NSPasteboard.general
             guard !items.isEmpty else { return }
-            // Don't restore if another app changed the clipboard during injection
-            guard pb.changeCount == changeCount + 1 else { return }
+            // Don't restore if another app changed the clipboard after our write
+            guard pb.changeCount == expectedChangeCount else { return }
             pb.clearContents()
             for item in items {
                 let pbItem = NSPasteboardItem()
@@ -116,6 +120,9 @@ final class TextInjectionEngine: @unchecked Sendable {
         let beforePaste = captureFocusedElementSnapshot()
 
         copyToClipboard(text)
+        // Capture changeCount AFTER our write, not before.
+        // clearContents() + setString() may increment by 1 or 2 depending on macOS version.
+        let postWriteChangeCount = NSPasteboard.general.changeCount
         usleep(50_000)
         simulatePaste()
         usleep(100_000)
@@ -126,7 +133,7 @@ final class TextInjectionEngine: @unchecked Sendable {
         if outcome == .inserted {
             // Paste succeeded: restore the user's original clipboard
             usleep(50_000)  // Extra delay to ensure target app has read the clipboard
-            savedClipboard.restore()
+            savedClipboard.restore(expectedChangeCount: postWriteChangeCount)
         }
         // If .copiedToClipboard: leave recognized text in clipboard as fallback
 
