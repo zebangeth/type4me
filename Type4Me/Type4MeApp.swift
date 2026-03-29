@@ -45,8 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[Type4Me] applicationDidFinishLaunching")
-        // Show in Dock on launch; hides when all windows are closed.
-        NSApp.setActivationPolicy(.regular)
+        // Show or hide Dock icon based on user preference
+        let showDock = UserDefaults.standard.object(forKey: "tf_showDockIcon") as? Bool ?? true
+        NSApp.setActivationPolicy(showDock ? .regular : .accessory)
         KeychainService.migrateIfNeeded()
         HotwordStorage.seedIfNeeded()
 
@@ -183,21 +184,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Start SenseVoice Python server if needed
+        if KeychainService.selectedASRProvider == .sherpa
+            && ModelManager.selectedStreamingModel == .senseVoiceSmall {
+            Task {
+                do {
+                    try await SenseVoiceServerManager.shared.start()
+                } catch {
+                    NSLog("[App] SenseVoice server start failed: %@", String(describing: error))
+                }
+            }
+        }
+
         // Check if menu bar icon is hidden by macOS 26+ "Allow in Menu Bar" setting
         checkMenuBarVisibility()
 
-        // Dynamic activation policy: show dock icon when windows are open
+        // Listen for Dock icon preference changes
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleManagedWindowDidBecomeKey(_:)),
-            name: NSWindow.didBecomeKeyNotification,
-            object: nil
-        )
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleManagedWindowWillClose(_:)),
-            name: NSWindow.willCloseNotification,
+            selector: #selector(dockIconPreferenceChanged(_:)),
+            name: UserDefaults.didChangeNotification,
             object: nil
         )
     }
@@ -338,35 +344,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
-    private func handleManagedWindowDidBecomeKey(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              window.identifier?.rawValue == "settings" ||
-              window.identifier?.rawValue == "setup" ||
-              window.title.contains("Type4Me") else { return }
-        NSApp.setActivationPolicy(.regular)
-    }
-
-    @objc
-    private func handleManagedWindowWillClose(_ notification: Notification) {
-        Timer.scheduledTimer(
-            timeInterval: 0.3,
-            target: self,
-            selector: #selector(updateActivationPolicyAfterWindowClose(_:)),
-            userInfo: nil,
-            repeats: false
-        )
-    }
-
-    @objc
-    private func updateActivationPolicyAfterWindowClose(_ timer: Timer) {
-        let hasVisibleWindow = NSApp.windows.contains {
-            $0.isVisible && !$0.className.contains("StatusBar") && !$0.className.contains("Panel")
-            && $0.level == .normal
-        }
-        if !hasVisibleWindow {
-            NSApp.setActivationPolicy(.accessory)
-            // Resign active so menu bar or previous app gets focus
-            NSApp.hide(nil)
+    private func dockIconPreferenceChanged(_ notification: Notification) {
+        let showDock = UserDefaults.standard.object(forKey: "tf_showDockIcon") as? Bool ?? true
+        let current = NSApp.activationPolicy()
+        let desired: NSApplication.ActivationPolicy = showDock ? .regular : .accessory
+        if current != desired {
+            NSApp.setActivationPolicy(desired)
         }
     }
 
@@ -442,6 +425,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Stored by MenuBarContent so AppDelegate can open the settings window.
+    static var openSettingsAction: (() -> Void)?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Task { await SenseVoiceServerManager.shared.stop() }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            Self.openSettingsAction?()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
     private func userFacingMessage(for error: Error) -> String {
         if let captureError = error as? AudioCaptureError,
            let description = captureError.errorDescription {
@@ -508,13 +506,11 @@ struct MenuBarContent: View {
         Divider()
 
         Button(L("设置向导...", "Setup Wizard...")) {
-            NSApp.setActivationPolicy(.regular)
             openWindow(id: "setup")
             NSApp.activate(ignoringOtherApps: true)
         }
 
         Button(L("偏好设置...", "Preferences...")) {
-            NSApp.setActivationPolicy(.regular)
             openSettingsWindow(id: "settings")
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -529,6 +525,13 @@ struct MenuBarContent: View {
 
         // Force re-render when language changes
         let _ = language
+
+        // Register the settings opener for Dock icon click
+        let _ = {
+            AppDelegate.openSettingsAction = { [openSettingsWindow] in
+                openSettingsWindow(id: "settings")
+            }
+        }()
     }
 
     private var statusColor: Color {

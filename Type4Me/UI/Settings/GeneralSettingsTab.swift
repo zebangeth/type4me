@@ -461,7 +461,7 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
             }
         }
         .padding(.vertical, 6)
-        .onChange(of: selectedASRProvider) { _, newProvider in
+        .onChange(of: selectedASRProvider) { oldProvider, newProvider in
             testTask?.cancel()
             downloadTask?.cancel()
             downloadTask = nil
@@ -473,6 +473,14 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
             KeychainService.selectedASRProvider = newProvider
             loadASRCredentialsForProvider(newProvider)
             refreshModelStatus()
+            // Stop SenseVoice server when switching away from sherpa
+            if oldProvider == .sherpa && newProvider != .sherpa {
+                Task { await SenseVoiceServerManager.shared.stop() }
+            }
+            // Start SenseVoice server when switching to sherpa with SenseVoice model
+            if newProvider == .sherpa && ModelManager.selectedStreamingModel == .senseVoiceSmall {
+                Task { try? await SenseVoiceServerManager.shared.start() }
+            }
         }
     }
 
@@ -567,12 +575,23 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
                         .foregroundStyle(isSelected ? TF.settingsAccentGreen : TF.settingsTextTertiary)
                         .onTapGesture {
                             guard isDownloaded else { return }
+                            let oldModel = selectedStreamingModel
                             selectedStreamingModel = model
                             ModelManager.selectedStreamingModel = model
                             asrTestStatus = .idle
                             let defaults = ["modelDir": ModelManager.defaultModelsDir]
                             try? KeychainService.saveASRCredentials(for: .sherpa, values: defaults)
                             KeychainService.selectedASRProvider = .sherpa
+                            // Manage SenseVoice server lifecycle on model switch
+                            if model != oldModel {
+                                Task {
+                                    if model == .senseVoiceSmall {
+                                        try? await SenseVoiceServerManager.shared.start()
+                                    } else {
+                                        await SenseVoiceServerManager.shared.stop()
+                                    }
+                                }
+                            }
                         }
                 } else {
                     // Not downloaded: download button on the left
@@ -679,15 +698,6 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
                     guard downloadingModel == model else { return }
                     downloadingModel = nil
                     refreshModelStatus()
-                    // Auto-download Silero VAD when downloading SenseVoice
-                    if model == .senseVoiceSmall {
-                        let vadType = ModelManager.AuxModelType.sileroVad
-                        if !ModelManager.shared.isModelAvailable(vadType) {
-                            Task {
-                                try? await ModelManager.shared.downloadModel(vadType) { _ in }
-                            }
-                        }
-                    }
                     // Auto-select if first download
                     if modelDownloadStatus.values.filter({ $0 }).count == 1 {
                         selectedStreamingModel = model
@@ -1211,7 +1221,8 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
     @AppStorage("tf_visualStyle") private var visualStyle = "timeline"
     @AppStorage("tf_language") private var language = AppLanguage.systemDefault
     @AppStorage("tf_escAbortEnabled") private var escAbortEnabled = true
-    @AppStorage("tf_preserveClipboard") private var preserveClipboard = false
+    @AppStorage("tf_preserveClipboard") private var preserveClipboard = true
+    @AppStorage("tf_showDockIcon") private var showDockIcon = true
 
     @State private var hasMic = false
     @State private var hasAccessibility = false
@@ -1245,7 +1256,7 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
 
                 SettingsDivider()
 
-                // Row 2: 四等分 - 开机启动 / 降低音量 / ESC打断 / 保留剪贴板
+                // Row 2: 三等分 - 开机启动 / 降低音量 / ESC打断
                 HStack(alignment: .top, spacing: 16) {
                     launchAtLoginRow
                         .frame(maxWidth: .infinity)
@@ -1253,7 +1264,17 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
                         .frame(maxWidth: .infinity)
                     escAbortRow
                         .frame(maxWidth: .infinity)
+                }
+
+                SettingsDivider()
+
+                // Row 3: 三等分 - 保留剪贴板 / Dock图标 / (占位)
+                HStack(alignment: .top, spacing: 16) {
                     preserveClipboardRow
+                        .frame(maxWidth: .infinity)
+                    dockIconRow
+                        .frame(maxWidth: .infinity)
+                    Color.clear
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -1498,11 +1519,35 @@ struct GeneralSettingsTab: View, SettingsCardHelpers {
                     set: { preserveClipboard = $0 == "on" }
                 ),
                 options: [
-                    ("off", L("关闭", "Off")),
                     ("on", L("开启", "On")),
+                    ("off", L("关闭", "Off")),
                 ]
             )
-            Text(L("关闭后仅在输入失败时保留剪贴板", "When off, clipboard is preserved only on injection failure"))
+            Text(L("输入后恢复剪贴板原有内容", "Restore clipboard contents after voice input"))
+                .font(.system(size: 10))
+                .foregroundStyle(TF.settingsTextTertiary)
+                .lineSpacing(2)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var dockIconRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("DOCK 图标", "Dock Icon").uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(TF.settingsTextTertiary)
+            settingsDropdown(
+                selection: Binding(
+                    get: { showDockIcon ? "on" : "off" },
+                    set: { showDockIcon = $0 == "on" }
+                ),
+                options: [
+                    ("on", L("显示", "Show")),
+                    ("off", L("隐藏", "Hide")),
+                ]
+            )
+            Text(L("隐藏后仅保留菜单栏图标", "When hidden, only the menu bar icon remains"))
                 .font(.system(size: 10))
                 .foregroundStyle(TF.settingsTextTertiary)
                 .lineSpacing(2)

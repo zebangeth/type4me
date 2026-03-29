@@ -23,7 +23,7 @@ enum SherpaASRError: Error, LocalizedError {
 
 /// Local streaming speech recognizer using SherpaOnnx (Paraformer architecture).
 ///
-/// SenseVoice models are handled by `SenseVoiceASRClient` instead.
+/// SenseVoice models are handled by `SenseVoiceWSClient` via Python server.
 actor SherpaASRClient: SpeechRecognizer {
 
     private let logger = Logger(
